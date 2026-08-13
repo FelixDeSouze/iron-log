@@ -1,0 +1,218 @@
+const fs = require('fs');
+let src = fs.readFileSync('workout-tracker.html', 'utf8');
+
+function must(name, count, actual) {
+  if (actual !== count) throw new Error('Expected ' + count + ' occurrence(s) of "' + name + '" but found ' + actual);
+}
+function replaceOnce(name, find, replace) {
+  const count = src.split(find).length - 1;
+  must(name, 1, count);
+  src = src.replace(find, replace);
+}
+function removeBetween(name, startMarker, endMarker) {
+  const startIdx = src.indexOf(startMarker);
+  if (startIdx === -1) throw new Error('start marker not found: ' + name);
+  const endIdx = src.indexOf(endMarker, startIdx);
+  if (endIdx === -1) throw new Error('end marker not found: ' + name);
+  src = src.slice(0, startIdx) + src.slice(endIdx);
+}
+
+// --- Title ---
+replaceOnce('title', '<title>Iron Log — Workout &amp; Body Composition Tracker</title>',
+  '<title>Iron Log — Progress (Viewer)</title>');
+
+// --- Nav: remove Data button ---
+replaceOnce('nav data button',
+  `        <button class="nav-btn" data-tab="data"><svg viewBox="0 0 20 20" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 15.5h10a3 3 0 0 0 .5-6 4.5 4.5 0 0 0-8.7-1.6A3.5 3.5 0 0 0 5 15.5z"/><polyline points="10,12.5 10,7.5"/><polyline points="7.5,9.5 10,7 12.5,9.5"/></svg>Data</button>
+`, '');
+
+// --- Panel: remove panel-data section ---
+replaceOnce('panel-data section',
+  `      <section class="panel" id="panel-scans"></section>
+      <section class="panel" id="panel-data"></section>`,
+  `      <section class="panel" id="panel-scans"></section>`);
+
+// --- SEED DATA block: remove entirely ---
+removeBetween('seed data block',
+  '/* ============================== SEED DATA ============================== */\n',
+  '/* ============================== UTIL ============================== */');
+
+// --- CSV PARSE block: remove entirely ---
+removeBetween('csv parse block',
+  '/* ============================== CSV PARSE ============================== */',
+  '/* ============================== EVOLT PDF-PASTE PARSER ============================== */');
+
+// --- EVOLT PDF-PASTE PARSER block: remove entirely ---
+removeBetween('evolt parser block',
+  '/* ============================== EVOLT PDF-PASTE PARSER ============================== */',
+  '/* ============================== STATE / STORAGE ============================== */');
+
+// --- STATE / STORAGE: replace with fetch-based loader ---
+replaceOnce('state/storage block',
+`/* ============================== STATE / STORAGE ============================== */
+var LS_SETS='wpt.sets.v1', LS_SCANS='wpt.scans.v1', LS_SEEDED='wpt.seeded.v1', LS_META='wpt.meta.v1', LS_THEME='wpt.theme.v1';
+var state={ sets:[], scans:[], meta:{lastImportAt:null,lastImportName:null}, activeTab:'overview', openSession:null, selectedExercise:null, scanCompareFrom:null, scanCompareTo:null };
+
+function loadState(){
+  var rawSets=localStorage.getItem(LS_SETS);
+  var rawScans=localStorage.getItem(LS_SCANS);
+  var rawMeta=localStorage.getItem(LS_META);
+  var seeded=localStorage.getItem(LS_SEEDED);
+  if(!seeded){
+    var parsed=csvTextToSets(b64ToUtf8(MACROFACTOR_CSV_B64));
+    state.sets=parsed.sets;
+    state.scans=[SEED_SCAN];
+    state.meta={lastImportAt:new Date().toISOString(),lastImportName:'MacroFactor export (seed)'};
+    persist();
+    localStorage.setItem(LS_SEEDED,'1');
+  } else {
+    state.sets = rawSets? JSON.parse(rawSets):[];
+    state.scans = rawScans? JSON.parse(rawScans):[];
+    state.meta = rawMeta? JSON.parse(rawMeta):{lastImportAt:null,lastImportName:null};
+  }
+}
+function persist(){
+  localStorage.setItem(LS_SETS, JSON.stringify(state.sets));
+  localStorage.setItem(LS_SCANS, JSON.stringify(state.scans));
+  localStorage.setItem(LS_META, JSON.stringify(state.meta));
+}
+`,
+`/* ============================== STATE / STORAGE ============================== */
+/* Read-only viewer: no local edits, no localStorage for app data. Everything comes
+   from data.json, published by the private local editor via the GitHub API. */
+var LS_THEME='wpt.theme.v1';
+var state={ sets:[], scans:[], meta:{lastImportAt:null,lastImportName:null}, activeTab:'overview', openSession:null, selectedExercise:null, scanCompareFrom:null, scanCompareTo:null };
+`);
+
+// --- buildScanForm + SCAN_FIELDS_*: remove entirely (up to svgHtml, which we also drop) ---
+removeBetween('scan form block',
+  'var SCAN_FIELDS_BASIC=[',
+  'function svgHtml(paths,size){ var s=el(\'span\'); s.innerHTML=svgIcon(paths,size); return s; }\n');
+
+// --- renderScans(): drop the "Log a body scan" form card ---
+replaceOnce('renderScans form card',
+`  var formCard=el('div',{class:'card'});
+  formCard.appendChild(el('div',{class:'card-title'},[el('h3',{},['Log a body scan']),el('span',{class:'sub'},['Evolt 360 — enter the figures from your PDF export'])]));
+  formCard.appendChild(buildScanForm());
+  panel.appendChild(formCard);
+
+  if(scansAsc.length){`,
+`  if(scansAsc.length){`);
+
+// --- scanTable(): drop edit/delete actions column ---
+replaceOnce('scanTable actions column',
+`  thead.appendChild(el('tr',{},[el('th',{},['Date']),el('th',{},['Weight']),el('th',{},['Body fat %']),el('th',{},['Skeletal muscle']),el('th',{},['Visceral level']),el('th',{},[''])]));
+  table.appendChild(thead);
+  var tbody=el('tbody');
+  scans.forEach(function(s){
+    var tr=el('tr');
+    tr.appendChild(el('td',{class:'strong'},[fmtDate(s.date,true)]));
+    tr.appendChild(el('td',{},[s.weightKg!=null?fmtNum(s.weightKg,1)+' kg':'—']));
+    tr.appendChild(el('td',{},[s.bodyFatPct!=null?fmtNum(s.bodyFatPct,1)+'%':'—']));
+    tr.appendChild(el('td',{},[s.skeletalMuscleMass!=null?fmtNum(s.skeletalMuscleMass,1)+' kg':'—']));
+    tr.appendChild(el('td',{},[s.visceralFatLevel!=null?s.visceralFatLevel+'':'—']));
+    var actionsTd=el('td',{style:'text-align:right;white-space:nowrap'});
+    var editBtn=el('button',{class:'btn',style:'padding:5px 8px;margin-right:6px'});
+    editBtn.innerHTML=svgIcon(ICONS.edit,13);
+    editBtn.addEventListener('click',function(){
+      var panel=$('#panel-scans');
+      var formCard=panel.querySelector('.card');
+      formCard.querySelectorAll('form').forEach(function(f){f.remove();});
+      formCard.appendChild(buildScanForm(s));
+      formCard.scrollIntoView({behavior:'smooth',block:'start'});
+    });
+    var delBtn=el('button',{class:'btn btn-danger',style:'padding:5px 8px'});
+    delBtn.innerHTML=svgIcon(ICONS.trash,13);
+    delBtn.addEventListener('click',function(){
+      confirmModal('Delete this scan?','This removes the body scan entry from '+fmtDate(s.date,true)+'. This can\\'t be undone.','Delete',function(){
+        state.scans=state.scans.filter(function(x){return x.id!==s.id;});
+        persist(); renderScans(); toast('Scan deleted.');
+      });
+    });
+    actionsTd.appendChild(editBtn); actionsTd.appendChild(delBtn);
+    tr.appendChild(actionsTd);
+    tbody.appendChild(tr);
+  });`,
+`  thead.appendChild(el('tr',{},[el('th',{},['Date']),el('th',{},['Weight']),el('th',{},['Body fat %']),el('th',{},['Skeletal muscle']),el('th',{},['Visceral level'])]));
+  table.appendChild(thead);
+  var tbody=el('tbody');
+  scans.forEach(function(s){
+    var tr=el('tr');
+    tr.appendChild(el('td',{class:'strong'},[fmtDate(s.date,true)]));
+    tr.appendChild(el('td',{},[s.weightKg!=null?fmtNum(s.weightKg,1)+' kg':'—']));
+    tr.appendChild(el('td',{},[s.bodyFatPct!=null?fmtNum(s.bodyFatPct,1)+'%':'—']));
+    tr.appendChild(el('td',{},[s.skeletalMuscleMass!=null?fmtNum(s.skeletalMuscleMass,1)+' kg':'—']));
+    tr.appendChild(el('td',{},[s.visceralFatLevel!=null?s.visceralFatLevel+'':'—']));
+    tbody.appendChild(tr);
+  });`);
+
+// --- RENDER: DATA section through end of GITHUB PUBLISH block: remove entirely ---
+removeBetween('render data + github publish block',
+  '/* ============================== RENDER: DATA ============================== */',
+  '/* ============================== NAV / THEME / INIT ============================== */');
+
+// --- TAB_META: drop data entry ---
+replaceOnce('tab meta data entry',
+`  scans:{title:'Body Scans', sub:'Evolt 360 body composition history.'},
+  data:{title:'Data', sub:'Import exports, back up your history, and share it with your trainer.'}
+};`,
+`  scans:{title:'Body Scans', sub:'Evolt 360 body composition history.'}
+};`);
+
+// --- renderTab(): drop data case ---
+replaceOnce('renderTab data case',
+`  else if(tab==='scans') renderScans();
+  else if(tab==='data') renderData();
+}`,
+`  else if(tab==='scans') renderScans();
+}`);
+
+// --- updateSyncNote(): simplify (no lastImportAt/meta concept in viewer) ---
+replaceOnce('updateSyncNote',
+`function updateSyncNote(){
+  var note=$('#syncNote');
+  var sessions=buildSessions();
+  var parts=[];
+  parts.push(sessions.length+' sessions');
+  parts.push(state.scans.length+' scan'+(state.scans.length===1?'':'s'));
+  note.textContent=parts.join(' · ')+(state.meta.lastImportAt? (' · synced '+new Date(state.meta.lastImportAt).toLocaleDateString()) : '');
+}`,
+`function updateSyncNote(){
+  var note=$('#syncNote');
+  var sessions=buildSessions();
+  var parts=[];
+  parts.push(sessions.length+' sessions');
+  parts.push(state.scans.length+' scan'+(state.scans.length===1?'':'s'));
+  note.textContent=parts.join(' · ')+(state.meta.lastImportAt? (' · published '+new Date(state.meta.lastImportAt).toLocaleDateString()) : '');
+}`);
+
+// --- Init: async fetch of data.json instead of localStorage seed ---
+replaceOnce('init block',
+`loadState();
+setActiveTab('overview');
+updateSyncNote();
+})();`,
+`setActiveTab('overview');
+fetch('./data.json', {cache:'no-store'})
+  .then(function(r){ if(!r.ok) throw new Error('missing'); return r.json(); })
+  .then(function(data){
+    state.sets = data.sets||[];
+    state.scans = data.scans||[];
+    state.meta = {lastImportAt:data.exportedAt||null, lastImportName:null};
+    renderAll();
+  })
+  .catch(function(){
+    $('#syncNote').textContent='No data published yet.';
+  });
+})();`);
+
+// --- Empty-state copy: no more "Data" tab to point people at ---
+replaceOnce('overview empty state copy',
+  "'No workouts logged yet — head to Data to import your export.'",
+  "'No workouts published yet.'");
+replaceOnce('workouts empty state copy',
+  "'No workouts yet. Import a MacroFactor export from the Data tab.'",
+  "'No workouts published yet.'");
+
+fs.writeFileSync('viewer.html', src);
+console.log('viewer.html written,', src.length, 'bytes (was', fs.statSync('workout-tracker.html').size, ')');
