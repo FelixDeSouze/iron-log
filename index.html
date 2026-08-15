@@ -780,7 +780,7 @@ function renderOverview(){
     var wFrom=state.weekCompareFrom, wTo=state.weekCompareTo;
 
     var compareCard=el('div',{class:'card',style:'margin-top:14px'});
-    compareCard.appendChild(el('div',{class:'card-title'},[el('h3',{},['Compare weeks']),el('span',{class:'sub'},['totals build up from your first logged week — drag to compare any two points'])]));
+    compareCard.appendChild(el('div',{class:'card-title'},[el('h3',{},['Compare weeks']),el('span',{class:'sub'},['totals for the selected window, vs. the same number of weeks before it — drag either handle to change it'])]));
     compareCard.appendChild(buildWeekCompareControl(weeks));
     compareCard.appendChild(buildWeekCompareSummary(weeks, wFrom, wTo));
     volHost=el('div',{class:'chart-wrap',style:'margin-top:16px'});
@@ -876,8 +876,8 @@ function buildWeekCompareControl(weeksAsc){
 
   return wrap;
 }
-function cumulativeThroughWeek(weeks, idx){
-  var slice=weeks.slice(0, idx+1);
+function sumWeeksRange(weeks, fromIdx, toIdx){
+  var slice=weeks.slice(fromIdx, toIdx+1);
   return {
     sessions: sum(slice.map(function(w){return w.sessions.length;})),
     volume: sum(slice.map(function(w){return w.volume;})),
@@ -886,11 +886,14 @@ function cumulativeThroughWeek(weeks, idx){
   };
 }
 function buildWeekCompareSummary(weeks, fromIdx, toIdx){
-  // Cumulative running totals (everything logged from the very first week up to
-  // each point), not a single week's snapshot — so the delta reads as the total
-  // increase between the two selected points, e.g. "start" to "current".
-  var a=cumulativeThroughWeek(weeks, fromIdx);
-  var b=cumulativeThroughWeek(weeks, toIdx);
+  // Totals for the selected window itself (so they move with the slider/presets,
+  // matching the "Volume across this window" chart below), compared against the
+  // equal-length window immediately before it — same pattern as the "This week"
+  // tiles above, just at whatever zoom level is currently selected.
+  var windowLen=toIdx-fromIdx+1;
+  var prevFromIdx=fromIdx-windowLen, prevToIdx=fromIdx-1;
+  var b=sumWeeksRange(weeks, fromIdx, toIdx);
+  var a=prevFromIdx>=0 ? sumWeeksRange(weeks, prevFromIdx, prevToIdx) : null;
   var wrap=el('div',{class:'compare-grid'});
   var grid=el('div',{class:'grid stat-grid'});
   function ctile(label,aVal,bVal,opts){
@@ -903,10 +906,10 @@ function buildWeekCompareSummary(weeks, fromIdx, toIdx){
     card.appendChild(deltaChip(bVal,aVal,opts));
     return card;
   }
-  grid.appendChild(ctile('Total sessions', a.sessions, b.sessions, {neutral:true,showPct:false}));
-  grid.appendChild(ctile('Total volume (kg)', Math.round(a.volume), Math.round(b.volume), {neutral:true,showPct:false}));
-  grid.appendChild(ctile('Total sets', a.sets, b.sets, {neutral:true,showPct:false}));
-  grid.appendChild(ctile('Total time trained', Math.round(a.durationSec/60), Math.round(b.durationSec/60), {neutral:true,suffix:'min',showPct:false}));
+  grid.appendChild(ctile('Total sessions', a?a.sessions:null, b.sessions, {neutral:true,showPct:false}));
+  grid.appendChild(ctile('Total volume (kg)', a?Math.round(a.volume):null, Math.round(b.volume), {neutral:true,showPct:false}));
+  grid.appendChild(ctile('Total sets', a?a.sets:null, b.sets, {neutral:true,showPct:false}));
+  grid.appendChild(ctile('Total time trained', a?Math.round(a.durationSec/60):null, Math.round(b.durationSec/60), {neutral:true,suffix:'min',showPct:false}));
   wrap.appendChild(grid);
   return wrap;
 }
