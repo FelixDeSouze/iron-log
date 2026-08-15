@@ -763,9 +763,9 @@ function renderOverview(){
     var wFrom=state.weekCompareFrom, wTo=state.weekCompareTo;
 
     var compareCard=el('div',{class:'card',style:'margin-top:14px'});
-    compareCard.appendChild(el('div',{class:'card-title'},[el('h3',{},['Compare weeks']),el('span',{class:'sub'},['drag to zoom in on any stretch — defaults to the whole logged history'])]));
+    compareCard.appendChild(el('div',{class:'card-title'},[el('h3',{},['Compare weeks']),el('span',{class:'sub'},['totals build up from the first logged week — drag to compare any two points'])]));
     compareCard.appendChild(buildWeekCompareControl(weeks));
-    compareCard.appendChild(buildWeekCompareSummary(weeks[wFrom], weeks[wTo]));
+    compareCard.appendChild(buildWeekCompareSummary(weeks, wFrom, wTo));
     volHost=el('div',{class:'chart-wrap',style:'margin-top:16px'});
     compareCard.appendChild(el('div',{style:'margin-top:18px'},[el('div',{class:'card-title',style:'margin-bottom:2px'},[el('h3',{style:'font-size:13px'},['Volume across this window'])])]));
     compareCard.appendChild(volHost);
@@ -859,22 +859,35 @@ function buildWeekCompareControl(weeksAsc){
 
   return wrap;
 }
-function buildWeekCompareSummary(weekA, weekB){
+function cumulativeThroughWeek(weeks, idx){
+  var slice=weeks.slice(0, idx+1);
+  return {
+    sessions: sum(slice.map(function(w){return w.sessions.length;})),
+    volume: sum(slice.map(function(w){return w.volume;})),
+    sets: sum(slice.map(function(w){return w.sets;}))
+  };
+}
+function buildWeekCompareSummary(weeks, fromIdx, toIdx){
+  // Cumulative running totals (everything logged from the very first week up to
+  // each point), not a single week's snapshot — so the delta reads as the total
+  // increase between the two selected points, e.g. "start" to "current".
+  var a=cumulativeThroughWeek(weeks, fromIdx);
+  var b=cumulativeThroughWeek(weeks, toIdx);
   var wrap=el('div',{class:'compare-grid'});
   var grid=el('div',{class:'grid stat-grid'});
-  function ctile(label,a,b,opts){
+  function ctile(label,aVal,bVal,opts){
     opts=opts||{};
     var card=el('div',{class:'card stat-tile'});
     card.appendChild(el('div',{class:'eyebrow'},[label]));
-    var valueNode=el('div',{class:'value'},[b!=null?fmtNum(b,opts.decimals||0):'—']);
-    if(opts.suffix && b!=null) valueNode.appendChild(el('small',{},[opts.suffix]));
+    var valueNode=el('div',{class:'value'},[bVal!=null?fmtNum(bVal,opts.decimals||0):'—']);
+    if(opts.suffix && bVal!=null) valueNode.appendChild(el('small',{},[opts.suffix]));
     card.appendChild(valueNode);
-    card.appendChild(deltaChip(b,a,opts));
+    card.appendChild(deltaChip(bVal,aVal,opts));
     return card;
   }
-  grid.appendChild(ctile('Sessions', weekA.sessions.length, weekB.sessions.length, {neutral:true}));
-  grid.appendChild(ctile('Volume (kg)', Math.round(weekA.volume), Math.round(weekB.volume), {neutral:true}));
-  grid.appendChild(ctile('Sets', weekA.sets, weekB.sets, {neutral:true}));
+  grid.appendChild(ctile('Total sessions', a.sessions, b.sessions, {neutral:true,showPct:false}));
+  grid.appendChild(ctile('Total volume (kg)', Math.round(a.volume), Math.round(b.volume), {neutral:true,showPct:false}));
+  grid.appendChild(ctile('Total sets', a.sets, b.sets, {neutral:true,showPct:false}));
   wrap.appendChild(grid);
   return wrap;
 }
