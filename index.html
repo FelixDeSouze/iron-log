@@ -58,6 +58,10 @@ body{margin:0;background:var(--page);color:var(--text-primary);font-family:var(-
 .brand-mark svg{width:17px;height:17px;stroke:#06231b;}
 .brand-text .h-title{font-size:16px;line-height:1.1;}
 .brand-text .eyebrow{margin-top:2px;}
+.person-switch{display:flex;background:var(--surface-2);border:1px solid var(--border);border-radius:9px;padding:3px;gap:3px;margin:0 6px 4px;}
+.person-switch button{flex:1;border:none;background:transparent;color:var(--text-secondary);font-size:12.5px;font-weight:700;padding:7px 6px;border-radius:6px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.person-switch button.active{background:var(--surface);color:var(--accent-ink);box-shadow:0 1px 2px rgba(0,0,0,0.08);}
+.person-switch button:hover:not(.active){color:var(--text-primary);}
 .nav{display:flex;flex-direction:column;gap:2px;}
 .nav-btn{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:8px;border:none;background:transparent;color:var(--text-secondary);font-size:13.5px;font-weight:600;letter-spacing:0.01em;cursor:pointer;text-align:left;width:100%;}
 .nav-btn svg{width:17px;height:17px;stroke:currentColor;fill:none;flex:none;}
@@ -231,6 +235,7 @@ select:focus, .field input:focus{outline:2px solid var(--accent);outline-offset:
   .rail{position:sticky;top:0;height:auto;flex-direction:row;align-items:center;padding:10px 12px;overflow-x:auto;z-index:20;}
   .brand{padding:0;}
   .brand-text{display:none;}
+  .person-switch{margin:0 0 0 8px;max-width:150px;}
   .nav{flex-direction:row;}
   .nav-btn{flex-direction:column;gap:3px;font-size:9.5px;padding:6px 9px;white-space:nowrap;}
   .rail-foot{margin-top:0;flex-direction:row;margin-left:auto;}
@@ -248,6 +253,7 @@ select:focus, .field input:focus{outline:2px solid var(--accent);outline-offset:
           <div class="eyebrow">Progress Tracker</div>
         </div>
       </div>
+      <div class="person-switch" id="personSwitch"></div>
       <div class="nav" id="nav">
         <button class="nav-btn" data-tab="overview"><svg viewBox="0 0 20 20" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="6.5" height="6.5" rx="1.3"/><rect x="11" y="2.5" width="6.5" height="6.5" rx="1.3"/><rect x="2.5" y="11" width="6.5" height="6.5" rx="1.3"/><rect x="11" y="11" width="6.5" height="6.5" rx="1.3"/></svg>Overview</button>
         <button class="nav-btn" data-tab="workouts"><svg viewBox="0 0 20 20" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="10" x2="17" y2="10"/><line x1="3" y1="7" x2="3" y2="13"/><line x1="1.5" y1="8" x2="1.5" y2="12"/><line x1="17" y1="7" x2="17" y2="13"/><line x1="18.5" y1="8" x2="18.5" y2="12"/></svg>Workouts</button>
@@ -323,14 +329,21 @@ function sum(arr){ return arr.reduce(function(a,b){return a+b;},0); }
 function todayStr(){ return isoDate(new Date()); }
 
 /* ============================== STATE / STORAGE ============================== */
-/* Read-only viewer: no local edits, no localStorage for app data. Everything comes
-   from data.json, published by the private local editor via the GitHub API. */
+/* Read-only viewer: no local edits, no localStorage for workout/scan data. Everything
+   comes from data.json, published by the private local editor via the GitHub API — it
+   carries both people's data, so the switcher still works here; only the person picked
+   is remembered locally (a display preference, not app data). */
 var LS_THEME='wpt.theme.v1';
-var state={ sets:[], scans:[], meta:{lastImportAt:null,lastImportName:null}, activeTab:'overview', openSession:null, selectedExercise:null, scanCompareFrom:null, scanCompareTo:null, weekCompareFrom:null, weekCompareTo:null };
+var LS_ACTIVE_PERSON='wpt.activePerson.v1';
+var state={ sets:[], scans:[], meta:{A:{lastImportAt:null,lastImportName:null},B:{lastImportAt:null,lastImportName:null}}, activeTab:'overview', openSession:null, selectedExercise:null, scanCompareFrom:null, scanCompareTo:null, weekCompareFrom:null, weekCompareTo:null, people:{A:'Darren',B:'Jade'}, activePerson:'A' };
+state.activePerson = localStorage.getItem(LS_ACTIVE_PERSON) || 'A';
+function setActivePerson(p){ state.activePerson=p; localStorage.setItem(LS_ACTIVE_PERSON,p); }
+function activeSets(){ return state.sets.filter(function(s){ return (s.owner||'A')===state.activePerson; }); }
+function activeScans(){ return state.scans.filter(function(s){ return (s.owner||'A')===state.activePerson; }); }
 /* ============================== DERIVED DATA ============================== */
 function buildSessions(){
   var map={};
-  state.sets.forEach(function(s){
+  activeSets().forEach(function(s){
     var key=s.date+'|'+s.routine+'|'+s.durationSec;
     if(!map[key]) map[key]={date:s.date, routine:s.routine, durationSec:s.durationSec, sets:[], exOrder:[]};
     map[key].sets.push(s);
@@ -357,7 +370,13 @@ function routineCategory(routine){
   if(r.indexOf('pull')>=0) return 'Pull';
   if(r.indexOf('lower')>=0) return 'Lower';
   if(r.indexOf('upper')>=0) return 'Upper';
-  if(r.indexOf('core')>=0) return 'Core';
+  if(r.indexOf('core')>=0 || r.indexOf('ab')>=0) return 'Core';
+  // Freeform titles (e.g. Strong app's "Leg day", "Chest / Shoulders") don't use the
+  // Push/Pull/Lower/Upper convention directly — infer from body-part keywords instead.
+  if(/\b(leg|glute|hamstring|quad|calf)\b/.test(r)) return 'Lower';
+  if(/\b(chest|tricep)\b/.test(r)) return 'Push';
+  if(/\b(back|bicep|row)\b/.test(r)) return 'Pull';
+  if(/\bshoulder\b/.test(r)) return 'Upper';
   return 'Other';
 }
 var CAT_COLOR_VAR={Push:'--cat-1',Pull:'--cat-2',Lower:'--cat-3',Upper:'--cat-4',Core:'--cat-5',Other:'--cat-other'};
@@ -381,7 +400,7 @@ function buildWeeks(sessions){
 }
 
 function exerciseSeries(exercise){
-  var rows=state.sets.filter(function(s){ return s.exercise===exercise && s.setType!=='Warm-Up Set'; });
+  var rows=activeSets().filter(function(s){ return s.exercise===exercise && s.setType!=='Warm-Up Set'; });
   var byDate={};
   rows.forEach(function(s){
     if(!byDate[s.date]) byDate[s.date]=[];
@@ -741,7 +760,7 @@ function renderOverview(){
   statGrid.appendChild(tile('This week · time trained', thisWeek?Math.round((thisWeek.durationSec||0)/60):0, lastWeek?Math.round((lastWeek.durationSec||0)/60):null, function(v){return v;}, {unit:'m',suffix:'min'}));
   panel.appendChild(statGrid);
 
-  var scanSorted=state.scans.slice().sort(function(a,b){return a.date<b.date?1:-1;});
+  var scanSorted=activeScans().slice().sort(function(a,b){return a.date<b.date?1:-1;});
   var latestScan=scanSorted[0], prevScan=scanSorted[1];
   if(latestScan){
     var scanGrid=el('div',{class:'grid stat-grid',style:'margin-top:14px'});
@@ -908,13 +927,13 @@ function renderWorkouts(){
 
   var exCard=el('div',{class:'card'});
   exCard.appendChild(el('div',{class:'card-title'},[el('h3',{},['Exercise progress'])]));
-  var allExercises=uniq(state.sets.map(function(s){return s.exercise;})).sort();
+  var allExercises=uniq(activeSets().map(function(s){return s.exercise;})).sort();
   var selRow=el('div',{class:'select-row'});
   var select=el('select',{id:'exerciseSelect'});
   allExercises.forEach(function(ex){ select.appendChild(el('option',{value:ex},[ex])); });
   if(!state.selectedExercise || allExercises.indexOf(state.selectedExercise)<0){
     var counts={};
-    state.sets.forEach(function(s){ counts[s.exercise]=(counts[s.exercise]||0)+1; });
+    activeSets().forEach(function(s){ counts[s.exercise]=(counts[s.exercise]||0)+1; });
     state.selectedExercise = allExercises.slice().sort(function(a,b){return (counts[b]||0)-(counts[a]||0);})[0];
   }
   select.value=state.selectedExercise;
@@ -1086,7 +1105,7 @@ function renderCalendar(host, sessions){
 /* ============================== RENDER: BODY SCANS ============================== */
 function renderScans(){
   var panel=$('#panel-scans'); panel.innerHTML='';
-  var scansAsc=state.scans.slice().sort(function(a,b){return a.date<b.date?-1:1;});
+  var scansAsc=activeScans().slice().sort(function(a,b){return a.date<b.date?-1:1;});
   var scansDesc=scansAsc.slice().reverse();
 
   if(scansAsc.length){
@@ -1307,10 +1326,28 @@ function renderAll(){ renderTab(state.activeTab); updateSyncNote(); }
 function updateSyncNote(){
   var note=$('#syncNote');
   var sessions=buildSessions();
+  var scans=activeScans();
+  var meta=state.meta[state.activePerson]||{};
   var parts=[];
   parts.push(sessions.length+' sessions');
-  parts.push(state.scans.length+' scan'+(state.scans.length===1?'':'s'));
-  note.textContent=parts.join(' · ')+(state.meta.lastImportAt? (' · published '+new Date(state.meta.lastImportAt).toLocaleDateString()) : '');
+  parts.push(scans.length+' scan'+(scans.length===1?'':'s'));
+  note.textContent=(state.people[state.activePerson]||'')+' · '+parts.join(' · ')+(meta.lastImportAt? (' · synced '+new Date(meta.lastImportAt).toLocaleDateString()) : '');
+}
+function renderPersonSwitch(){
+  var box=$('#personSwitch'); box.innerHTML='';
+  ['A','B'].forEach(function(p){
+    var btn=el('button',{class:p===state.activePerson?'active':''},[state.people[p]||(p==='A'?'Person A':'Person B')]);
+    btn.addEventListener('click',function(){
+      if(state.activePerson===p) return;
+      setActivePerson(p);
+      state.selectedExercise=null; state.openSession=null;
+      state.scanCompareFrom=null; state.scanCompareTo=null;
+      state.weekCompareFrom=null; state.weekCompareTo=null;
+      renderPersonSwitch();
+      renderAll();
+    });
+    box.appendChild(btn);
+  });
 }
 $all('.nav-btn').forEach(function(b){ b.addEventListener('click',function(){ setActiveTab(b.getAttribute('data-tab')); }); });
 
@@ -1339,9 +1376,12 @@ setActiveTab('overview');
 fetch('./data.json', {cache:'no-store'})
   .then(function(r){ if(!r.ok) throw new Error('missing'); return r.json(); })
   .then(function(data){
+    state.people = data.people || state.people;
+    if(!state.people[state.activePerson]) state.activePerson='A';
     state.sets = data.sets||[];
     state.scans = data.scans||[];
-    state.meta = {lastImportAt:data.exportedAt||null, lastImportName:null};
+    state.meta = {A:{lastImportAt:data.exportedAt||null},B:{lastImportAt:data.exportedAt||null}};
+    renderPersonSwitch();
     renderAll();
   })
   .catch(function(){
