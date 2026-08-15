@@ -326,8 +326,7 @@ function todayStr(){ return isoDate(new Date()); }
 /* Read-only viewer: no local edits, no localStorage for app data. Everything comes
    from data.json, published by the private local editor via the GitHub API. */
 var LS_THEME='wpt.theme.v1';
-var state={ sets:[], scans:[], meta:{lastImportAt:null,lastImportName:null}, activeTab:'overview', openSession:null, selectedExercise:null, scanCompareFrom:null, scanCompareTo:null };
-
+var state={ sets:[], scans:[], meta:{lastImportAt:null,lastImportName:null}, activeTab:'overview', openSession:null, selectedExercise:null, scanCompareFrom:null, scanCompareTo:null, weekCompareFrom:null, weekCompareTo:null };
 /* ============================== DERIVED DATA ============================== */
 function buildSessions(){
   var map={};
@@ -753,26 +752,144 @@ function renderOverview(){
     panel.appendChild(scanGrid);
   }
 
-  var row=el('div',{class:'grid two-col',style:'margin-top:14px'});
-  var volCard=el('div',{class:'card'});
-  volCard.appendChild(el('div',{class:'card-title'},[el('h3',{},['Weekly training volume']),el('span',{class:'sub'},['kg lifted, last '+Math.min(weeks.length,12)+' weeks'])]));
-  var volChartHost=el('div',{class:'chart-wrap'});
-  volCard.appendChild(volChartHost);
-  row.appendChild(volCard);
+  var n=weeks.length;
+  var volHost=null;
+  if(n>=2){
+    if(state.weekCompareFrom==null || state.weekCompareFrom>=n) state.weekCompareFrom=0;
+    if(state.weekCompareTo==null || state.weekCompareTo>=n) state.weekCompareTo=n-1;
+    if(state.weekCompareFrom>state.weekCompareTo) state.weekCompareFrom=state.weekCompareTo;
+    var wFrom=state.weekCompareFrom, wTo=state.weekCompareTo;
 
-  var recentCard=el('div',{class:'card'});
+    var compareCard=el('div',{class:'card',style:'margin-top:14px'});
+    compareCard.appendChild(el('div',{class:'card-title'},[el('h3',{},['Compare weeks']),el('span',{class:'sub'},['totals build up from your first logged week — drag to compare any two points'])]));
+    compareCard.appendChild(buildWeekCompareControl(weeks));
+    compareCard.appendChild(buildWeekCompareSummary(weeks, wFrom, wTo));
+    volHost=el('div',{class:'chart-wrap',style:'margin-top:16px'});
+    compareCard.appendChild(el('div',{style:'margin-top:18px'},[el('div',{class:'card-title',style:'margin-bottom:2px'},[el('h3',{style:'font-size:13px'},['Volume across this window'])])]));
+    compareCard.appendChild(volHost);
+    panel.appendChild(compareCard);
+  } else if(n===1){
+    var soloCard=el('div',{class:'card',style:'margin-top:14px'});
+    soloCard.appendChild(el('div',{class:'card-title'},[el('h3',{},['Weekly training volume'])]));
+    volHost=el('div',{class:'chart-wrap'});
+    soloCard.appendChild(volHost);
+    panel.appendChild(soloCard);
+  }
+
+  var recentCard=el('div',{class:'card',style:'margin-top:14px'});
   recentCard.appendChild(el('div',{class:'card-title'},[el('h3',{},['Recent sessions'])]));
   var recentList=el('div');
   sessions.slice(0,5).forEach(function(s){ recentList.appendChild(miniSessionRow(s)); });
   if(!sessions.length) recentList.appendChild(el('div',{class:'empty'},['No workouts published yet.']));
   recentCard.appendChild(recentList);
-  row.appendChild(recentCard);
-  panel.appendChild(row);
+  panel.appendChild(recentCard);
 
-  requestAnimationFrame(function(){
-    var recentWeeks=weeks.slice(-12);
-    barChart(volChartHost, recentWeeks.map(function(w){return w.week;}), [{name:'Volume',color:cssVar('--cat-1'),values:recentWeeks.map(function(w){return Math.round(w.volume);})}], {width:volChartHost.clientWidth||560,height:210,legend:false,xFormat:fmtWeekLabel,yFormat:function(v){return fmtNum(v);}});
+  if(volHost){
+    var windowedWeeks = n>=2 ? weeks.slice(state.weekCompareFrom, state.weekCompareTo+1) : weeks;
+    requestAnimationFrame(function(){
+      barChart(volHost, windowedWeeks.map(function(w){return w.week;}), [{name:'Volume',color:cssVar('--cat-1'),values:windowedWeeks.map(function(w){return Math.round(w.volume);})}], {width:volHost.clientWidth||560,height:210,legend:false,xFormat:fmtWeekLabel,yFormat:function(v){return fmtNum(v);}});
+    });
+  }
+}
+function buildWeekCompareControl(weeksAsc){
+  var n=weeksAsc.length;
+  var wrap=el('div');
+  var head=el('div',{class:'compare-head'});
+  var label=el('div',{class:'range-label'});
+  head.appendChild(label);
+  var presets=el('div',{class:'compare-presets'});
+  var presetDefs=[['All',0,n-1]];
+  if(n>4) presetDefs.push(['Last 4',n-4,n-1]);
+  if(n>8) presetDefs.push(['Last 8',n-8,n-1]);
+  if(n>12) presetDefs.push(['Last 12',n-12,n-1]);
+  var presetBtns=[];
+  presetDefs.forEach(function(p){
+    var btn=el('button',{type:'button'},[p[0]]);
+    btn.addEventListener('click',function(){
+      state.weekCompareFrom=p[1]; state.weekCompareTo=p[2];
+      renderOverview();
+    });
+    presets.appendChild(btn);
+    presetBtns.push({btn:btn,from:p[1],to:p[2]});
   });
+  head.appendChild(presets);
+  wrap.appendChild(head);
+
+  var slider=el('div',{class:'range-compare'});
+  var track=el('div',{class:'range-track'});
+  var fill=el('div',{class:'range-track-fill'});
+  slider.appendChild(track); slider.appendChild(fill);
+  var fromInput=el('input',{type:'range',min:'0',max:String(n-1),step:'1',value:String(state.weekCompareFrom),style:'z-index:3'});
+  var toInput=el('input',{type:'range',min:'0',max:String(n-1),step:'1',value:String(state.weekCompareTo),style:'z-index:4'});
+  slider.appendChild(fromInput); slider.appendChild(toInput);
+  wrap.appendChild(slider);
+
+  var ticks=el('div',{class:'range-ticks'},[fmtWeekLabel(weeksAsc[0].week), n>1?fmtWeekLabel(weeksAsc[n-1].week):'']);
+  wrap.appendChild(ticks);
+
+  function updateVisual(){
+    var f=parseInt(fromInput.value,10), t=parseInt(toInput.value,10);
+    if(f>t){ if(document.activeElement===fromInput){ t=f; toInput.value=String(t); } else { f=t; fromInput.value=String(f); } }
+    var pctF=n>1? (f/(n-1))*100 : 0;
+    var pctT=n>1? (t/(n-1))*100 : 100;
+    fill.style.left=pctF+'%'; fill.style.right=(100-pctT)+'%';
+    label.innerHTML='';
+    label.appendChild(document.createTextNode(fmtWeekLabel(weeksAsc[f].week)));
+    label.appendChild(el('small',{},['→']));
+    label.appendChild(document.createTextNode(fmtWeekLabel(weeksAsc[t].week)));
+    label.appendChild(el('small',{},['('+(t-f+1)+' week'+(t-f+1===1?'':'s')+')']));
+    presetBtns.forEach(function(p){ p.btn.classList.toggle('active', p.from===f && p.to===t); });
+  }
+  updateVisual();
+
+  fromInput.addEventListener('pointerdown',function(){ fromInput.style.zIndex='5'; toInput.style.zIndex='3'; });
+  toInput.addEventListener('pointerdown',function(){ toInput.style.zIndex='5'; fromInput.style.zIndex='3'; });
+  fromInput.addEventListener('input', updateVisual);
+  toInput.addEventListener('input', updateVisual);
+  function commit(){
+    var f=parseInt(fromInput.value,10), t=parseInt(toInput.value,10);
+    if(f>t){ var tmp=f; f=t; t=tmp; }
+    state.weekCompareFrom=f; state.weekCompareTo=t;
+    renderOverview();
+  }
+  fromInput.addEventListener('change', commit);
+  toInput.addEventListener('change', commit);
+
+  return wrap;
+}
+function cumulativeThroughWeek(weeks, idx){
+  var slice=weeks.slice(0, idx+1);
+  return {
+    sessions: sum(slice.map(function(w){return w.sessions.length;})),
+    volume: sum(slice.map(function(w){return w.volume;})),
+    sets: sum(slice.map(function(w){return w.sets;})),
+    durationSec: sum(slice.map(function(w){return w.durationSec||0;}))
+  };
+}
+function buildWeekCompareSummary(weeks, fromIdx, toIdx){
+  // Cumulative running totals (everything logged from the very first week up to
+  // each point), not a single week's snapshot — so the delta reads as the total
+  // increase between the two selected points, e.g. "start" to "current".
+  var a=cumulativeThroughWeek(weeks, fromIdx);
+  var b=cumulativeThroughWeek(weeks, toIdx);
+  var wrap=el('div',{class:'compare-grid'});
+  var grid=el('div',{class:'grid stat-grid'});
+  function ctile(label,aVal,bVal,opts){
+    opts=opts||{};
+    var card=el('div',{class:'card stat-tile'});
+    card.appendChild(el('div',{class:'eyebrow'},[label]));
+    var valueNode=el('div',{class:'value'},[bVal!=null?fmtNum(bVal,opts.decimals||0):'—']);
+    if(opts.suffix && bVal!=null) valueNode.appendChild(el('small',{},[opts.suffix]));
+    card.appendChild(valueNode);
+    card.appendChild(deltaChip(bVal,aVal,opts));
+    return card;
+  }
+  grid.appendChild(ctile('Total sessions', a.sessions, b.sessions, {neutral:true,showPct:false}));
+  grid.appendChild(ctile('Total volume (kg)', Math.round(a.volume), Math.round(b.volume), {neutral:true,showPct:false}));
+  grid.appendChild(ctile('Total sets', a.sets, b.sets, {neutral:true,showPct:false}));
+  grid.appendChild(ctile('Total time trained', Math.round(a.durationSec/60), Math.round(b.durationSec/60), {neutral:true,suffix:'min',showPct:false}));
+  wrap.appendChild(grid);
+  return wrap;
 }
 function miniSessionRow(s){
   var cat=routineCategory(s.routine);
