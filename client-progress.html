@@ -314,14 +314,19 @@ function parseProgramCSV(text, cycleLabel){
       var cell=(rows[r][c]||'').toString();
       var m1=cell.match(/TRAINING PLAN FOR:\s*(.+)/i);
       if(m1 && !client) client=m1[1].trim();
-      if(/^DATE:/i.test(cell.trim())){
+      // "DATE:" isn't always its own cell — some sheets have merged header rows
+      // where it's embedded mid-string, so this isn't anchored to cell-start.
+      if(/DATE:/i.test(cell)){
         for(var c2=c+1; c2<rows[r].length; c2++){
           var iso=parseDDMY(rows[r][c2]);
           if(iso){ cycleStart=iso; break; }
         }
       }
-      var m2=cell.match(/^WEEK\s*(\d+)/i);
-      if(m2) weekCols.push({weekNum:parseInt(m2[1],10), col:c});
+      // Week 1's header cell can also have the first day merged into it
+      // ("WEEK 1 TRAINING Mon - PUSH") rather than that day sitting on its own
+      // row — capture it here so that first day isn't left unattributed.
+      var m2=cell.match(/^WEEK\s*(\d+)\s*TRAINING\s*(.*)/i);
+      if(m2) weekCols.push({weekNum:parseInt(m2[1],10), col:c, inlineDay:(m2[2]||'').trim()});
     }
     if(weekCols.length) break;
   }
@@ -329,7 +334,10 @@ function parseProgramCSV(text, cycleLabel){
   weekCols.sort(function(a,b){return a.col-b.col;});
   var weekHeaderRowIdx=rows.findIndex(function(row){ return row.some(function(c){ return /^WEEK\s*\d+/i.test((c||'').toString()); }); });
   var base=weekCols[0].col;
-  var sets=[], currentDay=null, currentCategory=null, i=weekHeaderRowIdx+1;
+  var sets=[];
+  var currentDay=weekCols[0].inlineDay||null;
+  var currentCategory=currentDay?categoryFromDay(currentDay):null;
+  var i=weekHeaderRowIdx+1;
   while(i<rows.length){
     var row=rows[i];
     var colA=(row[base+0]||'').toString().trim();
