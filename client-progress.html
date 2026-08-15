@@ -288,6 +288,7 @@ function round1(n){ return Math.round(n*10)/10; }
 function epley1RM(w,r){ return w*(1+r/30); }
 function uniq(arr){ return arr.filter(function(v,i){ return arr.indexOf(v)===i; }); }
 function sum(arr){ return arr.reduce(function(a,b){return a+b;},0); }
+function todayStr(){ return isoDate(new Date()); }
 function cssVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
 /* ============================== PROGRAM SHEET PARSER ============================== */
@@ -871,9 +872,9 @@ function renderOverview(){
   headCard.appendChild(headRow);
   panel.appendChild(headCard);
 
+  var thisWeekCard=buildThisWeekCard(weeks);
+  if(thisWeekCard) panel.appendChild(thisWeekCard);
   if(sessions.length){
-    var thisWeekCard=buildThisWeekCard(weeks);
-    if(thisWeekCard) panel.appendChild(thisWeekCard);
     var winsCard=buildRecentWinsCard();
     if(winsCard) panel.appendChild(winsCard);
   }
@@ -1024,28 +1025,54 @@ function miniSessionRow(s){
   return row;
 }
 
+function currentProgramWeekRef(){
+  // Anchored to the real calendar week, not just "whichever week we last saw data
+  // for" — a client who stopped logging weeks ago should be told that plainly,
+  // not shown a stale week under the "This week" label as if it's current.
+  var allWeeks=uniq(state.prescribed.map(function(p){ return weekKeyOf(p.date); })).sort();
+  if(!allWeeks.length) return null;
+  var todayKey=weekKeyOf(todayStr());
+  if(allWeeks.indexOf(todayKey)>=0) return {key:todayKey, status:'current'};
+  var past=allWeeks.filter(function(k){ return k<todayKey; });
+  if(past.length) return {key:past[past.length-1], status:'past'};
+  return {key:allWeeks[0], status:'upcoming'};
+}
 function buildThisWeekCard(weeks){
-  if(!weeks.length) return null;
-  var lastWeek=weeks[weeks.length-1];
-  var completion=weekCompletion(lastWeek.week);
+  var ref=currentProgramWeekRef();
+  if(!ref) return null;
+  var completion=weekCompletion(ref.key);
+  if(!completion.total) return null;
+  var todayKey=weekKeyOf(todayStr());
+  var weeksAgo=Math.round((parseLocalDate(todayKey)-parseLocalDate(ref.key))/(7*86400000));
+  var isStale=ref.status!=='current';
+
+  var titleText = ref.status==='current' ? 'This week' : (ref.status==='upcoming' ? 'Upcoming week' : 'Most recent program week');
+  var subText = 'week of '+fmtDate(ref.key,true);
+  if(ref.status==='past') subText += ' — '+weeksAgo+' week'+(weeksAgo===1?'':'s')+' ago';
+  else if(ref.status==='upcoming') subText += ' — not started yet';
+
   var streak=bestCurrentStreak();
   var milestones=computeMilestones();
   var card=el('div',{class:'card',style:'margin-top:14px'});
-  card.appendChild(el('div',{class:'card-title'},[el('h3',{},['This week']),el('span',{class:'sub'},['week of '+fmtDate(lastWeek.week,true)])]));
+  card.appendChild(el('div',{class:'card-title'},[el('h3',{},[titleText]),el('span',{class:'sub'},[subText])]));
 
-  var pct=completion.total>0 ? Math.round((completion.logged/completion.total)*100) : 0;
+  var pct=Math.round((completion.logged/completion.total)*100);
   var compRow=el('div',{class:'completion-row'});
   compRow.appendChild(el('span',{class:'label'},['Exercises logged']));
-  compRow.appendChild(el('span',{class:'frac'},[completion.logged+' of '+(completion.total||'—')]));
+  compRow.appendChild(el('span',{class:'frac'},[completion.logged+' of '+completion.total]));
   card.appendChild(compRow);
   var track=el('div',{class:'progress-track'});
   track.appendChild(el('div',{class:'progress-fill',style:'width:'+pct+'%'}));
   card.appendChild(track);
+  if(isStale) card.appendChild(el('p',{style:'font-size:11.5px;color:var(--warning);margin:8px 0 0'},['No activity logged since this week — nudge due.']));
 
   var chipsWrap=el('div',{class:'badge-row',style:'margin-top:14px'});
   var anyChip=false;
   if(streak){
-    chipsWrap.appendChild(el('span',{class:'badge'},[svgHtml(HL_ICONS.streak,14), streak.weeks+' weeks in a row training '+streak.category]));
+    var streakStale = weeks.length && weeksAgo>1 && weekKeyOf(todayStr())!==weeks[weeks.length-1].week && Math.round((parseLocalDate(todayKey)-parseLocalDate(weeks[weeks.length-1].week))/(7*86400000))>1;
+    var streakLabel = streak.weeks+' weeks in a row training '+streak.category;
+    if(streakStale) streakLabel += ' (through '+fmtDate(weeks[weeks.length-1].week,true)+')';
+    chipsWrap.appendChild(el('span',{class:'badge'+(streakStale?' badge-muted':'')},[svgHtml(HL_ICONS.streak,14), streakLabel]));
     anyChip=true;
   }
   milestones.forEach(function(m){
