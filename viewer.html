@@ -253,6 +253,7 @@ select:focus, .field input:focus{outline:2px solid var(--accent);outline-offset:
           <div class="eyebrow">Progress Tracker</div>
         </div>
       </div>
+      <div class="person-switch" id="personSwitch"></div>
       <div class="nav" id="nav">
         <button class="nav-btn" data-tab="overview"><svg viewBox="0 0 20 20" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="6.5" height="6.5" rx="1.3"/><rect x="11" y="2.5" width="6.5" height="6.5" rx="1.3"/><rect x="2.5" y="11" width="6.5" height="6.5" rx="1.3"/><rect x="11" y="11" width="6.5" height="6.5" rx="1.3"/></svg>Overview</button>
         <button class="nav-btn" data-tab="workouts"><svg viewBox="0 0 20 20" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="10" x2="17" y2="10"/><line x1="3" y1="7" x2="3" y2="13"/><line x1="1.5" y1="8" x2="1.5" y2="12"/><line x1="17" y1="7" x2="17" y2="13"/><line x1="18.5" y1="8" x2="18.5" y2="12"/></svg>Workouts</button>
@@ -328,14 +329,17 @@ function sum(arr){ return arr.reduce(function(a,b){return a+b;},0); }
 function todayStr(){ return isoDate(new Date()); }
 
 /* ============================== STATE / STORAGE ============================== */
-/* Read-only viewer: no local edits, no localStorage for app data. Everything comes
-   from data.json, published by the private local editor via the GitHub API. A publish
-   always carries one person's data, so these are simple pass-throughs (the editor's
-   versions filter by activePerson across two people; the viewer has only one). */
+/* Read-only viewer: no local edits, no localStorage for workout/scan data. Everything
+   comes from data.json, published by the private local editor via the GitHub API — it
+   carries both people's data, so the switcher still works here; only the person picked
+   is remembered locally (a display preference, not app data). */
 var LS_THEME='wpt.theme.v1';
+var LS_ACTIVE_PERSON='wpt.activePerson.v1';
 var state={ sets:[], scans:[], meta:{A:{lastImportAt:null,lastImportName:null},B:{lastImportAt:null,lastImportName:null}}, activeTab:'overview', openSession:null, selectedExercise:null, scanCompareFrom:null, scanCompareTo:null, weekCompareFrom:null, weekCompareTo:null, people:{A:'Darren',B:'Jade'}, activePerson:'A' };
-function activeSets(){ return state.sets; }
-function activeScans(){ return state.scans; }
+state.activePerson = localStorage.getItem(LS_ACTIVE_PERSON) || 'A';
+function setActivePerson(p){ state.activePerson=p; localStorage.setItem(LS_ACTIVE_PERSON,p); }
+function activeSets(){ return state.sets.filter(function(s){ return (s.owner||'A')===state.activePerson; }); }
+function activeScans(){ return state.scans.filter(function(s){ return (s.owner||'A')===state.activePerson; }); }
 /* ============================== DERIVED DATA ============================== */
 function buildSessions(){
   var map={};
@@ -1323,10 +1327,27 @@ function updateSyncNote(){
   var note=$('#syncNote');
   var sessions=buildSessions();
   var scans=activeScans();
+  var meta=state.meta[state.activePerson]||{};
   var parts=[];
   parts.push(sessions.length+' sessions');
   parts.push(scans.length+' scan'+(scans.length===1?'':'s'));
-  note.textContent=parts.join(' · ')+(state.meta.lastImportAt? (' · published '+new Date(state.meta.lastImportAt).toLocaleDateString()) : '');
+  note.textContent=(state.people[state.activePerson]||'')+' · '+parts.join(' · ')+(meta.lastImportAt? (' · synced '+new Date(meta.lastImportAt).toLocaleDateString()) : '');
+}
+function renderPersonSwitch(){
+  var box=$('#personSwitch'); box.innerHTML='';
+  ['A','B'].forEach(function(p){
+    var btn=el('button',{class:p===state.activePerson?'active':''},[state.people[p]||(p==='A'?'Person A':'Person B')]);
+    btn.addEventListener('click',function(){
+      if(state.activePerson===p) return;
+      setActivePerson(p);
+      state.selectedExercise=null; state.openSession=null;
+      state.scanCompareFrom=null; state.scanCompareTo=null;
+      state.weekCompareFrom=null; state.weekCompareTo=null;
+      renderPersonSwitch();
+      renderAll();
+    });
+    box.appendChild(btn);
+  });
 }
 $all('.nav-btn').forEach(function(b){ b.addEventListener('click',function(){ setActiveTab(b.getAttribute('data-tab')); }); });
 
@@ -1355,10 +1376,12 @@ setActiveTab('overview');
 fetch('./data.json', {cache:'no-store'})
   .then(function(r){ if(!r.ok) throw new Error('missing'); return r.json(); })
   .then(function(data){
+    state.people = data.people || state.people;
+    if(!state.people[state.activePerson]) state.activePerson='A';
     state.sets = data.sets||[];
     state.scans = data.scans||[];
-    state.meta = {lastImportAt:data.exportedAt||null, lastImportName:null};
-    if(data.person){ document.title = data.person+'\u2019s Progress \u2014 Iron Log'; }
+    state.meta = {A:{lastImportAt:data.exportedAt||null},B:{lastImportAt:data.exportedAt||null}};
+    renderPersonSwitch();
     renderAll();
   })
   .catch(function(){
